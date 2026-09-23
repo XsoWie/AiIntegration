@@ -1,0 +1,22 @@
+{
+    "AI Assist": "ИИ-помощник",
+    "AI Integration": "Интеграция ИИ",
+    "AI Provider": "Провайдер ИИ",
+    "AI is not configured.": "ИИ не настроен.",
+    "API Key": "API-ключ",
+    "An error occurred while connecting to the AI provider. Check the logs for more details.": "Произошла ошибка при подключении к провайдеру ИИ. Подробности смотрите в логах.",
+    "Base URL": "Базовый URL",
+    "Check spelling and grammar": "Проверить орфографию и грамматику",
+    "Draft Reply (AI)": "Черновик ответа (ИИ)",
+    "Last log message": "Последнее сообщение в логе",
+    "Load": "Загрузить",
+    "Make it friendlier": "Сделать дружелюбнее",
+    "Make it longer": "Сделать длиннее",
+    "Make it more professional": "Сделать более официальным",
+    "Make it shorter": "Сделать короче",
+    "Model": "Модель",
+    "Summarize": "Кратко изложить",
+    "Translation": "Перевод",
+    "Use": "Использовать",
+    "Use (as Draft)": "Использовать (как черновик)"
+}
