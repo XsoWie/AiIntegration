@@ -49,6 +49,9 @@ class AiIntegrationServiceProvider extends ServiceProvider
             'base_url' => 'https://api.openai.com/v1',
             'requires_api_key' => true,
             'embedding_model' => 'text-embedding-3-small',
+            // Newer OpenAI models (o-series, gpt-5.x, etc.) reject the legacy
+            // "max_tokens" parameter and require "max_completion_tokens".
+            'max_tokens_param' => 'max_completion_tokens',
         ],
         'gemini' => [
             'name' => 'Gemini (Google AI Studio)',
@@ -498,6 +501,27 @@ class AiIntegrationServiceProvider extends ServiceProvider
         }
     }
 
+    /**
+     * Name of the request parameter which limits the response length.
+     * OpenAI's newer models only accept "max_completion_tokens" while most
+     * other OpenAI-compatible providers still expect "max_tokens".
+     */
+    public static function getMaxTokensParam()
+    {
+        $param = self::getProviderConfig('max_tokens_param');
+        if ($param) {
+            return $param;
+        }
+
+        // Custom provider pointing to the official OpenAI API.
+        $base_url = self::getSetting('base_url');
+        if ($base_url && strtolower((string)parse_url($base_url, PHP_URL_HOST)) == 'api.openai.com') {
+            return 'max_completion_tokens';
+        }
+
+        return 'max_tokens';
+    }
+
     public static function checkConnection($request = null)
     {
         if (!$request) {
@@ -585,7 +609,7 @@ class AiIntegrationServiceProvider extends ServiceProvider
                     'content' => $user_content,
                 ],
             ],
-            'max_tokens' => $max_tokens,
+            self::getMaxTokensParam() => $max_tokens,
             'model' => self::getSetting('model'),
             // https://developers.openai.com/api/docs/guides/structured-outputs
             //'response_format' => $response_format
@@ -596,7 +620,7 @@ class AiIntegrationServiceProvider extends ServiceProvider
 
             $msg = '';
             if (empty($response['choices'][0]['message']['content'])) {
-                $msg = 'Response: '.json_encode($response);
+                $msg = 'Response: '.json_encode($response).json_encode($data);
             }
             if ($msg) {
                 self::logApiError($msg, self::METHOD_CHAT);
