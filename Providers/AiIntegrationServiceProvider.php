@@ -42,6 +42,16 @@ class AiIntegrationServiceProvider extends ServiceProvider
 
     const METHOD_MODELS = '/models';
     const METHOD_CHAT = '/chat/completions';
+    // Anthropic native Messages API.
+    const METHOD_MESSAGES = '/messages';
+
+    // Value of the anthropic-version header.
+    const ANTHROPIC_API_VERSION = '2023-06-01';
+    // Max models returned by Anthropic in one /models request (default is 20).
+    const ANTHROPIC_MODELS_LIMIT = 1000;
+
+    const API_FORMAT_OPENAI = 'openai';
+    const API_FORMAT_ANTHROPIC = 'anthropic';
 
     public static $providers = [
         'openai' => [
@@ -62,12 +72,13 @@ class AiIntegrationServiceProvider extends ServiceProvider
             // First - dot separated path: data.models
             'model_names_in_response' => 'models.name',
         ],
-        /*'anthropic' => [
+        'anthropic' => [
             'name' => 'Anthropic (Claude)',
             'base_url' => 'https://api.anthropic.com/v1',
             'requires_api_key' => true,
-            //'openai_compatible' => false,
-        ],*/
+            // Native Messages API is used instead of OpenAI-compatible one.
+            'api_format' => self::API_FORMAT_ANTHROPIC,
+        ],
         'deepseek' => [
             'name' => 'DeepSeek',
             'base_url' => 'https://api.deepseek.com',
@@ -434,6 +445,11 @@ class AiIntegrationServiceProvider extends ServiceProvider
                     return preg_replace("#/openai/?$#", self::METHOD_MODELS, $base_url).'?key='.$api_key;
                 },
             ],
+            'anthropic' => [
+                'get_models_base_url_fn' => function($base_url, $api_key) {
+                    return rtrim($base_url, '/').self::METHOD_MODELS.'?limit='.self::ANTHROPIC_MODELS_LIMIT;
+                },
+            ],
         ];
         foreach ($providers_extended as $provider_name => $provider_config) {
             self::$providers[$provider_name] = array_merge(self::$providers[$provider_name], $provider_config);
@@ -582,8 +598,18 @@ class AiIntegrationServiceProvider extends ServiceProvider
         ];
     }
 
+    // Returns API format of the provider: openai or anthropic.
+    public static function getApiFormat($provider = '')
+    {
+        return self::getProviderConfig('api_format', $provider) ?: self::API_FORMAT_OPENAI;
+    }
+
     public static function apiChatCompletions($system_instructions, $user_prompt, $images = [], /*$response_format,*/ $max_tokens = self::MAX_TOKENS)
     {
+        if (self::getApiFormat() == self::API_FORMAT_ANTHROPIC) {
+            return self::apiAnthropicMessages($system_instructions, $user_prompt, $images, $max_tokens);
+        }
+
         $user_content = json_encode($user_prompt, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 
         // When there are images, content becomes an array of parts
@@ -645,6 +671,96 @@ class AiIntegrationServiceProvider extends ServiceProvider
         ];
     }
 
+    // Anthropic Messages API: https://docs.anthropic.com/en/api/messages
+    public static function apiAnthropicMessages($system_instructions, $user_prompt, $images = [], $max_tokens = self::MAX_TOKENS)
+    {
+        $user_content = json_encode($user_prompt, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+
+        // When there are images, content becomes an array of blocks
+        // instead of a plain string. Images go before the text.
+        if ($images) {
+            $blocks = [];
+            foreach ($images as $image) {
+                $block = self::imageToAnthropicBlock($image);
+                if ($block) {
+                    $blocks[] = $block;
+                }
+            }
+            if ($blocks) {
+                $blocks[] = [
+                    'type' => 'text',
+                    'text' => $user_content,
+                ];
+                $user_content = $blocks;
+            }
+        }
+
+        $data = [
+            'model' => self::getSetting('model'),
+            'max_tokens' => $max_tokens,
+            // Unlike OpenAI, system prompt is a top-level parameter.
+            'system' => $system_instructions,
+            'messages' => [
+                [
+                    'role' => 'user',
+                    'content' => $user_content,
+                ],
+            ],
+        ];
+
+        try {
+            $response = self::apiRequest(self::METHOD_MESSAGES, $data);
+
+            // Response content is an array of blocks; collect text ones.
+            $text = '';
+            foreach ($response['content'] ?? [] as $block) {
+                if (($block['type'] ?? '') == 'text' && isset($block['text'])) {
+                    $text .= $block['text'];
+                }
+            }
+
+            if ($text === '') {
+                self::logApiError('Response: '.json_encode($response), self::METHOD_MESSAGES);
+            }
+        } catch (ApiCallException $e) {
+            self::logApiError($e->getMessage(), self::METHOD_MESSAGES);
+            return [
+                'status' => 'error',
+                'msg' => $e->getMessage()
+            ];
+        }
+
+        $data_decoded = null;
+        if ($text !== '') {
+            $data_decoded = self::jsonDecode($text, true);
+        }
+
+        return [
+            'status' => 'success',
+            'data' => $data_decoded ?: $text,
+        ];
+    }
+
+    // Converts OpenAI-style image_url part with a data URL into
+    // Anthropic image block.
+    public static function imageToAnthropicBlock($image)
+    {
+        $url = $image['image_url']['url'] ?? '';
+
+        if (!preg_match('#^data:([^;]+);base64,(.+)$#s', $url, $m)) {
+            return null;
+        }
+
+        return [
+            'type' => 'image',
+            'source' => [
+                'type' => 'base64',
+                'media_type' => $m[1],
+                'data' => $m[2],
+            ],
+        ];
+    }
+
     // If $data is passed, POST is used.
     private static function apiRequest($method, $data = [], $settings = [], $http_method = 'POST')
     {
@@ -691,7 +807,12 @@ class AiIntegrationServiceProvider extends ServiceProvider
             $headers[] = 'Content-Length: ' . strlen($json_data);
         }
 
-        if ($api_key && !$get_models_base_url_fn) {
+        if (self::getApiFormat($provider) == self::API_FORMAT_ANTHROPIC) {
+            if ($api_key) {
+                $headers[] = 'x-api-key: ' . $api_key;
+            }
+            $headers[] = 'anthropic-version: ' . self::ANTHROPIC_API_VERSION;
+        } elseif ($api_key && !$get_models_base_url_fn) {
             $headers[] = 'Authorization: Bearer ' . $api_key;
         }
 
@@ -745,7 +866,7 @@ class AiIntegrationServiceProvider extends ServiceProvider
                 }
             } elseif ($http_code < 200 || $http_code >= 300) {
                 // HTTP error.
-                if (in_array($http_code, [408, 425, 429, 500, 502, 503, 504])) {
+                if (in_array($http_code, [408, 425, 429, 500, 502, 503, 504, 529])) {
                     // Retry.
                     usleep($retry_delay_ms * $attempt * 1000);
                     continue;

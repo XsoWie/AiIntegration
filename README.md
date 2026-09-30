@@ -8,7 +8,7 @@ Bug reports and pull requests related to this module should be submitted to this
 
 ## Supported AI Providers
 
-*OpenAI, Gemini (Google AI Studio), DeepSeek, xAI, Mistral AI, Groq, Perplexity, Together AI, Fireworks AI, DigitalOcean Serverless Inference, Z.AI, Ollama (Local), LM Studio (Local), OpenRouter, Custom (OpenAI-compatible)*.
+*OpenAI, Gemini (Google AI Studio), Anthropic (Claude), DeepSeek, xAI, Mistral AI, Groq, Perplexity, Together AI, Fireworks AI, DigitalOcean Serverless Inference, Z.AI, Ollama (Local), LM Studio (Local), OpenRouter, Custom (OpenAI-compatible)*.
 
 Google's Gemini offers [API keys](https://aistudio.google.com/api-keys) with relatively generous free tiers.
 
